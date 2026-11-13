@@ -27,6 +27,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"rabia/faultsim"
 	"sort"
 	"strconv"
@@ -73,6 +74,10 @@ func run(args []string) {
 	shards := fs.Int("shards", 1, "number of shards")
 	_ = fs.Parse(args)
 
+	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	f, err := os.OpenFile(*out, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
