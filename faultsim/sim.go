@@ -1134,6 +1134,18 @@ func (s *sim) check() Result {
 	return res
 }
 
+// holds lists the requests a replica still holds: its pending queue plus the proposal of the slot it is working on.
+func (s *sim) holds(nd *node) []string {
+	var ids []string
+	for _, o := range nd.c.Queue {
+		ids = append(ids, o.GetIdSeq())
+	}
+	if seq := nd.c.SvrSeq; seq >= 0 && !nd.led[seq].IsDone {
+		ids = append(ids, nd.led[seq].MyProposal.GetIdSeq())
+	}
+	return ids
+}
+
 // livenessTags names the patterns behind a run's stalls (see Result.Liveness).
 func (s *sim) livenessTags(obs observation) []string {
 	tags := map[string]bool{}
@@ -1155,9 +1167,9 @@ func (s *sim) livenessTags(obs observation) []string {
 				tags["proposal-reply"] = true
 			}
 		}
-		for _, o := range nd.c.Queue {
+		for _, id := range s.holds(nd) {
 			for _, other := range live {
-				if !s.got[other.id][o.GetIdSeq()] {
+				if !s.got[other.id][id] {
 					tags["poison-request"] = true
 				}
 			}
@@ -1198,8 +1210,8 @@ func (s *sim) describeStall(nd *node, missing []string) string {
 		}
 	}
 	queued := map[string]bool{}
-	for _, o := range nd.c.Queue {
-		queued[o.GetIdSeq()] = true
+	for _, id := range s.holds(nd) {
+		queued[id] = true
 	}
 	var parts []string
 	for i, id := range missing {
@@ -1214,7 +1226,7 @@ func (s *sim) describeStall(nd *node, missing []string) string {
 		case nd.c.Discard[id]:
 			state = "marked discard"
 		case !queued[id]:
-			state = "not queued"
+			state = "not pending"
 		}
 		parts = append(parts, id+" "+state)
 	}

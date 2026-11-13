@@ -223,6 +223,48 @@ func TestDecisionNotRelayed(t *testing.T) {
 	}
 }
 
+// poisonRequest is a three-replica schedule with one crash (f = 1):
+//
+//  1. Each replica's proxy sends one request at tick 0. Replica 2's request 2-0 reaches replicas 0 and 2, but its
+//     copy to replica 1 is slow.
+//  2. Replica 2 crashes at tick 10 and its copy to replica 1 is lost. Replicas 0 and 1 decide 0-0 and 1-0.
+//  3. 2-0 now heads replica 0's pending queue. Replica 1 never received it and proposes the next request, 0-1.
+//     Neither value has a majority of three, so the slot is null, both replicas put their proposal back, and the
+//     next slot repeats this.
+func poisonRequest(crash bool) Config {
+	cfg := Config{Name: "scripted", N: 3, F: 1, Seed: 1, MinDelay: 1, MaxDelay: 1, MaxTicks: 20000,
+		Quiet: 200 * time.Microsecond, LenLedger: 256, RequestAt: []int{0, 0, 0, 300, 301}, LoseAll: true,
+		Delay: func(from, to int, m message.Msg, tick int) (int, bool) {
+			if m.Type == message.ClientRequest && from == 2 && to == 1 {
+				return 1000, true
+			}
+			return 1, true
+		}}
+	if crash {
+		cfg.CrashAt = map[int]int{2: 10}
+	}
+	return cfg
+}
+
+func TestPoisonRequest(t *testing.T) {
+	control := Run(poisonRequest(false))
+	if control.Outcome != "ok" {
+		t.Fatalf("without the crash the schedule should finish: %+v", control)
+	}
+	r := Run(poisonRequest(true))
+	if len(r.Safety) > 0 || len(r.Panics) > 0 {
+		t.Fatalf("unexpected: %+v", r)
+	}
+	tagged := map[string]bool{}
+	for _, tag := range r.Liveness {
+		tagged[tag] = true
+	}
+	if r.Outcome != "timeout" || !tagged["poison-request"] || !tagged["null-livelock"] {
+		t.Fatalf("expected a null livelock behind request 2-0: %+v", r)
+	}
+	t.Logf("%d null slots; %q", r.NullSlots, r.Stalls)
+}
+
 func TestReplayIsStable(t *testing.T) {
 	for _, p := range []string{"delay", "mixed"} {
 		a, b := runProfile(t, p, 5, 7), runProfile(t, p, 5, 7)
