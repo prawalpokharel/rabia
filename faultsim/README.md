@@ -113,10 +113,30 @@ running seeds twice (`campaign summary -compare`). `TestMutantsAreCaught` and
 `TestReplayIsStable` depend on it. Every run that is not ok writes its full
 delivery trace when `-traces` is set.
 
+## Scripted schedules
+
+Two tests pin liveness problems the campaign found to a fixed three-replica
+schedule with one crash (f = 1). Each test has a control run without the crash,
+which must finish.
+
+- `TestDecisionNotRelayed`: replica 2 decides and crashes. Its Vote and
+  Decision to replica 0 are lost. Replica 1 is behind, gets the Decision before
+  it votes, decides without voting and does not pass the Decision on. Replica 0
+  waits forever for a second phase-0 vote. Replica 1 then waits forever in the
+  next slot for replica 0's proposal.
+- `TestPoisonRequest`: replica 2's proxy sends request 2-0 to replicas 0 and 2
+  and crashes before the copy to replica 1 arrives. 2-0 heads replica 0's
+  pending queue from then on. Replica 1 never has it and proposes another
+  request. Neither value gets a majority, so every slot is null, both proposals
+  go back into the queues, and the next slot repeats this.
+
+Both tests assert the current behaviour, so a fix will make them fail and they
+will need flipping.
+
 ## Running it
 
 ```bash
-go test ./faultsim/                 # checker, safety, mutants, the scripted stall, replay
+go test ./faultsim/                 # checker, safety, mutants, the two scripted stalls, replay
 go test -short ./faultsim/          # fewer seeds
 go run ./faultsim/cmd/campaign run -profiles mixed -n 3,5 -seeds 200 -out r.jsonl -traces traces/
 go run ./faultsim/cmd/campaign summary r.jsonl
