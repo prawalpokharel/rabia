@@ -1134,13 +1134,19 @@ func (s *sim) check() Result {
 	return res
 }
 
+// decided reports whether a slot has a real decision. The sentinel that unblocks an executor at shutdown also ends
+// in epilogue, so a slot decided only by the sentinel was still undecided when the run stopped.
+func decided(sl *ledger.Slot) bool {
+	return sl.IsDone && sl.Decision.ProId != sentinelProId
+}
+
 // holds lists the requests a replica still holds: its pending queue plus the proposal of the slot it is working on.
 func (s *sim) holds(nd *node) []string {
 	var ids []string
 	for _, o := range nd.c.Queue {
 		ids = append(ids, o.GetIdSeq())
 	}
-	if seq := nd.c.SvrSeq; seq >= 0 && !nd.led[seq].IsDone {
+	if seq := nd.c.SvrSeq; seq >= 0 && !decided(nd.led[seq]) {
 		ids = append(ids, nd.led[seq].MyProposal.GetIdSeq())
 	}
 	return ids
@@ -1157,7 +1163,7 @@ func (s *sim) livenessTags(obs observation) []string {
 	}
 	for _, nd := range live {
 		seq := nd.c.SvrSeq
-		if seq >= 0 && !nd.led[seq].IsDone {
+		if seq >= 0 && !decided(nd.led[seq]) {
 			for _, other := range live {
 				if _, ok := obs.decisions[other.id][uint32(seq)]; ok {
 					tags["decided-elsewhere"] = true
@@ -1202,7 +1208,7 @@ reached it, is still in its pending queue, or is marked for discarding.
 */
 func (s *sim) describeStall(nd *node, missing []string) string {
 	where := "idle"
-	if seq := nd.c.SvrSeq; seq >= 0 && !nd.led[seq].IsDone {
+	if seq := nd.c.SvrSeq; seq >= 0 && !decided(nd.led[seq]) {
 		sl := nd.led[seq]
 		where = fmt.Sprintf("slot %d undecided at phase %d round %d", seq, sl.Phase, sl.Round)
 		if s.askedFor[nd.id] == seq && !s.answered[nd.id] {

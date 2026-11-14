@@ -115,7 +115,7 @@ delivery trace when `-traces` is set.
 
 ## Scripted schedules
 
-Two tests pin liveness problems the campaign found to a fixed three-replica
+Three tests pin liveness problems the campaign found to a fixed three-replica
 schedule with one crash (f = 1). Each test has a control run without the crash,
 which must finish.
 
@@ -130,13 +130,20 @@ which must finish.
   request. Neither value gets a majority, so every slot is null, both proposals
   go back into the queues, and the next slot repeats this.
 
-Both tests assert the current behaviour, so a fix will make them fail and they
-will need flipping.
+- `TestNoLiveWitness`: replicas 0 and 1 propose 0-0, but each counts only one
+  copy of it before it stops at n-f proposals. Replica 2 counts two copies and
+  votes 1, so every replica decides a value. Replicas 0 and 1 don't know which
+  value, so they ask with a ProposalRequest. Only a replica that counted a
+  majority answers, and replica 2 has crashed. They wait forever, although both
+  of them proposed 0-0.
+
+All three tests assert the current behaviour, so a fix will make them fail and
+they will need flipping.
 
 ## Running it
 
 ```bash
-go test ./faultsim/                 # checker, safety, mutants, the two scripted stalls, replay
+go test ./faultsim/                 # checker, safety, mutants, the scripted stalls, replay
 go test -short ./faultsim/          # fewer seeds
 go run ./faultsim/cmd/campaign run -profiles mixed -n 3,5 -seeds 200 -out r.jsonl -traces traces/
 go run ./faultsim/cmd/campaign summary r.jsonl

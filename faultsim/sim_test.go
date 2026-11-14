@@ -265,6 +265,59 @@ func TestPoisonRequest(t *testing.T) {
 	t.Logf("%d null slots; %q", r.NullSlots, r.Stalls)
 }
 
+// noLiveWitness is a three-replica schedule with one crash (f = 1). Some links are slow, and the first three slots
+// end null. Then, in slot 3:
+//
+//  1. Replicas 0 and 1 propose 0-0, and replica 2 proposes 2-0. The copies of 0-0 between replicas 0 and 1 are slow.
+//     Each of them counts its own 0-0 and replica 2's 2-0, and stops counting at n-f = 2 proposals.
+//  2. Only replica 2 counts two copies of 0-0. It is the only replica that votes 1 in phase 0.
+//  3. Every replica decides 1, meaning a value. Replica 2 knows the value is 0-0. Replicas 0 and 1 have no majority
+//     value, so they send a ProposalRequest, which only a replica that counted a majority answers.
+//  4. Replica 2 crashes at tick 250, losing its Decision and the requests still in flight to it. Replicas 0 and 1
+//     wait for a ProposalReply forever, although both of them proposed 0-0.
+func noLiveWitness(crash bool) Config {
+	cfg := Config{Name: "scripted", N: 3, F: 1, Seed: 1, MinDelay: 1, MaxDelay: 1, MaxTicks: 20000,
+		Quiet: 200 * time.Microsecond, LenLedger: 64, RequestAt: []int{0, 500, 0}, LoseAll: true,
+		Delay: func(from, to int, m message.Msg, tick int) (int, bool) {
+			switch {
+			case m.Type == message.ClientRequest && from == 0 && to == 2:
+				return 200, true
+			case m.Type == message.ClientRequest && from == 2 && to != 2:
+				return 5, true
+			case m.Type == message.Proposal && from == 2 && to == 2:
+				return 300, true
+			case (m.Type == message.Proposal || m.Type == message.Vote && m.Phase == 0) && from+to == 1:
+				return 50, true
+			case m.Type == message.Decision && from == 2:
+				return 300, true
+			case m.Type == message.ProposalRequest && to == 2:
+				return 300, true
+			}
+			return 1, true
+		}}
+	if crash {
+		cfg.CrashAt = map[int]int{2: 250}
+	}
+	return cfg
+}
+
+func TestNoLiveWitness(t *testing.T) {
+	control := Run(noLiveWitness(false))
+	if control.Outcome != "ok" {
+		t.Fatalf("without the crash the schedule should finish: %+v", control)
+	}
+	r := Run(noLiveWitness(true))
+	if len(r.Safety) > 0 || len(r.Panics) > 0 {
+		t.Fatalf("unexpected: %+v", r)
+	}
+	if r.Outcome != "stall" || len(r.Liveness) != 1 || r.Liveness[0] != "proposal-reply" {
+		t.Fatalf("expected replicas 0 and 1 to wait for a ProposalReply: %+v", r)
+	}
+	for _, s := range r.Stalls {
+		t.Log(s)
+	}
+}
+
 func TestReplayIsStable(t *testing.T) {
 	for _, p := range []string{"delay", "mixed"} {
 		a, b := runProfile(t, p, 5, 7), runProfile(t, p, 5, 7)
